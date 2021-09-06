@@ -5,5 +5,6 @@ payload:
   - DOMAIN-SUFFIX,cache.sqex-bridge.jp
   - DOMAIN-SUFFIX,prd-cdn-gdt-game.akamaized.net
   - DOMAIN-SUFFIX,chromiecraft.com
+  - DOMAIN-SUFFIX,overseas.gundambattle.com
   - IP-CIDR,54.251.197.149/32,no-resolve
   - IP-CIDR,118.194.254.197/32,no-resolve
