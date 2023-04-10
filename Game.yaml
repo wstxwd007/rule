@@ -1,13 +1,6 @@
 payload:
   - DOMAIN-SUFFIX,openai.com
-  - DOMAIN,openaiapi-site.azureedge.net
-  - DOMAIN,chat.openai.com.cdn.cloudflare.net
-  - DOMAIN-SUFFIX,challenges.cloudflare.com
-# Add ai.com
-  - DOMAIN-SUFFIX,ai.com
-# Add stripe.com
-  - DOMAIN-SUFFIX,invoice.stripe.com
-  - DOMAIN-SUFFIX,stripe.com
+  - DOMAIN-SUFFIX,auth0.com
   - DOMAIN-SUFFIX,uw-vi.com
   - DOMAIN-SUFFIX,gdt-game.net
   - DOMAIN-SUFFIX,unity3d.com
