@@ -1,12 +1,4 @@
 payload:
   - DOMAIN-SUFFIX,openai.com
   - DOMAIN-SUFFIX,auth0.com
-  - DOMAIN-SUFFIX,uw-vi.com
-  - DOMAIN-SUFFIX,gdt-game.net
-  - DOMAIN-SUFFIX,unity3d.com
-  - DOMAIN-SUFFIX,cache.sqex-bridge.jp
-  - DOMAIN-SUFFIX,prd-cdn-gdt-game.akamaized.net
-  - DOMAIN-SUFFIX,chromiecraft.com
-  - DOMAIN-SUFFIX,overseas.gundambattle.com
-  - IP-CIDR,54.251.197.149/32,no-resolve
-  - IP-CIDR,128.14.227.120/32,no-resolve
+ # - IP-CIDR,128.14.227.120/32,no-resolve
