@@ -11,5 +11,3 @@ payload:
   - DOMAIN-SUFFIX,music.163.com.163jiasu.com
   - IP-CIDR,115.238.119.0/24,no-resolve
   - IP-CIDR,59.111.128.0/17,no-resolve
-
-
