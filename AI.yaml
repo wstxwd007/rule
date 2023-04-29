@@ -1,1 +1,3 @@
-a
+payload:
+  - DOMAIN-SUFFIX,openai.com
+  - DOMAIN-SUFFIX,auth0.com
