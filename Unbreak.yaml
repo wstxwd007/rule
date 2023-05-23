@@ -1,4 +1,4 @@
 payload:
+  - DOMAIN,edge.api.myqnapcloud.com
   - DOMAIN-SUFFIX,mypikpak.com
   - DOMAIN-SUFFIX,plex.direct
-  - DOMAIN,edge.api.myqnapcloud.com
