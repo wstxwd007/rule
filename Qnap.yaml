@@ -1,3 +1,4 @@
 payload:
   - DOMAIN-SUFFIX,qnap.com
   - DOMAIN-SUFFIX,myqnapcloud.com
+  - DOMAIN-SUFFIX,myqnapcloud.io
