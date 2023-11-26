@@ -1,7 +1,7 @@
 payload:
   - DOMAIN,edge.api.myqnapcloud.com
   - DOMAIN,edge.myqnapcloud.io
-  - DOMAIN,plex.tv
+  - DOMAIN,v4.plex.tv
   - DOMAIN,sentry.io
   - DOMAIN-SUFFIX,mypikpak.com
   - DOMAIN-SUFFIX,plex.direct
