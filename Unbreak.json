@@ -1,0 +1,16 @@
+{
+    "rules": [
+        {
+            "domain": [
+                "edge.api.myqnapcloud.comm",
+                "edge.myqnapcloud.io"
+            ],
+            "domain_suffix": [
+                ".plex.tv",
+                ".sentry.io",
+                ".mypikpak.com",
+                ".plex.direct"
+            ]
+        }
+    ]
+}
