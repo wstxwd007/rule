@@ -1,0 +1,11 @@
+{
+    "rules": [
+        {
+            "domain_suffix": [
+                ".myqnapcloud.com",
+                ".qnap.com",
+                ".myqnapcloud.io"
+            ]
+        }
+    ]
+}
