@@ -1,0 +1,25 @@
+{
+    "version": 3,
+    "rules": [
+        {
+            "domain": [
+                "msftconnecttest.com",
+                "msftncsi.com",
+                "video007.my03.com",
+                "localhost.ptlogin2.qq.com",
+                "nic.changeip.com",
+                "edge.api.myqnapcloud.com",
+                "edge.myqnapcloud.io"
+            ],
+            "domain_suffix": [
+                ".lan",
+                ".msftconnecttest.com",
+                ".msftncsi.com",
+                ".315171.xyz",
+                ".19840228.top",
+                ".dnset.com",
+                ".25u.com"
+            ]
+        }
+    ]
+}
