@@ -3,7 +3,7 @@
     "rules": [
         {
             "domain": [
-                "edge.api.myqnapcloud.comm",
+                "edge.api.myqnapcloud.com",
                 "edge.myqnapcloud.io"
             ],
             "domain_suffix": [
