@@ -3,6 +3,7 @@
     "rules": [
         {
             "domain": [
+                "registry.linkease.net",
                 "edge.api.myqnapcloud.com",
                 "edge.myqnapcloud.io"
             ],
