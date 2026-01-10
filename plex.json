@@ -1,0 +1,21 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "domain": [
+        "plex.20120714.xyz"
+      ],
+      "domain_suffix": [
+        "plex.tv",
+        "plex.direct",
+        "plex.bz",
+        "tmdb.org",
+        "themoviedb.org",
+        "thetvdb.com"
+      ],
+      "domain_keyword": [
+        "plex"
+      ]
+    }
+  ]
+}
