@@ -16,11 +16,11 @@ jobs:
         run: |
           # 1. 下载原作者文件
           curl -L -o fakeip-filter.json https://github.com/DustinWin/ruleset_geodata/releases/download/sing-box-ruleset/fakeip-filter.json
-          
+          curl -L -o proxy.json https://github.com/DustinWin/ruleset_geodata/releases/download/sing-box-ruleset/proxy.json
           # 2. 将 "version": 4 替换为 "version": 2
           # 这样修改极其高效，不依赖复杂环境
           sed -i 's/"version": 4/"version": 2/g' fakeip-filter.json
-
+          sed -i 's/"version": 4/"version": 2/g' proxy.json
       - name: Compile to SRS (Optional but Recommended)
         run: |
           # 下载 sing-box 二进制文件用于编译规则
@@ -28,7 +28,7 @@ jobs:
           tar -xvf sing-box.tar.gz
           # 编译成 srs，RB5009 加载速度提升 10 倍
           ./sing-box-*/sing-box rule-set compile fakeip-filter.json
-
+          ./sing-box-*/sing-box rule-set compile proxy.json
       - name: Commit and Push
         run: |
           git config --global user.name "Actions Bot"
