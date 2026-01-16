@@ -1,0 +1,38 @@
+name: Sync and Downgrade Version
+
+on:
+  schedule:
+    - cron: '0 2 * * *' # 每天北京时间上午 10 点运行
+  workflow_dispatch:   # 允许你手动点击运行
+
+jobs:
+  sync-task:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download and Modify
+        run: |
+          # 1. 下载原作者文件
+          curl -L -o fakeip-filter.json https://github.com/DustinWin/ruleset_geodata/releases/download/sing-box-ruleset/fakeip-filter.json
+          
+          # 2. 将 "version": 4 替换为 "version": 2
+          # 这样修改极其高效，不依赖复杂环境
+          sed -i 's/"version": 4/"version": 2/g' rules.json
+
+      - name: Compile to SRS (Optional but Recommended)
+        run: |
+          # 下载 sing-box 二进制文件用于编译规则
+          curl -L -o sing-box.tar.gz https://github.com/SagerNet/sing-box/releases/download/v1.10.0/sing-box-1.10.0-linux-amd64.tar.gz
+          tar -xvf sing-box.tar.gz
+          # 编译成 srs，RB5009 加载速度提升 10 倍
+          ./sing-box-1.10.0-linux-amd64/sing-box rule-set compile fakeip-filter.json
+
+      - name: Commit and Push
+        run: |
+          git config --global user.name "Actions Bot"
+          git config --global user.email "actions@github.com"
+          git add fakeip-filter.json fakeip-filter.srs
+          git commit -m "Downgraded version to 2" || exit 0
+          git push
