@@ -21,18 +21,20 @@ jobs:
           # 这样修改极其高效，不依赖复杂环境
           sed -i 's/"version": 4/"version": 2/g' fakeip-filter.json
           sed -i 's/"version": 4/"version": 2/g' proxy.json
-      - name: Compile to SRS (Optional but Recommended)
+      - name: Compile to SRS
         run: |
-          # 下载 sing-box 二进制文件用于编译规则
           curl -L -o sing-box.tar.gz https://github.com/SagerNet/sing-box/releases/download/v1.10.0/sing-box-1.10.0-linux-amd64.tar.gz
           tar -xvf sing-box.tar.gz
-          # 编译成 srs，RB5009 加载速度提升 10 倍
-          ./sing-box-*/sing-box rule-set compile fakeip-filter.json
-          ./sing-box-*/sing-box rule-set compile proxy.json
+          # 自动编译目录下所有的 json 文件
+          for json_file in *.json; do
+            echo "Compiling $json_file..."
+            ./sing-box-*/sing-box rule-set compile "$json_file"
+          done
       - name: Commit and Push
         run: |
           git config --global user.name "Actions Bot"
           git config --global user.email "actions@github.com"
-          git add fakeip-filter.json fakeip-filter.srs
-          git commit -m "Downgraded version to 2" || exit 0
+          # 使用通配符，确保所有修改都被记录
+          git add *.json *.srs
+          git commit -m "Batch update: Downgraded to v2 and compiled to SRS" || exit 0
           git push
