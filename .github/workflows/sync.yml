@@ -27,7 +27,7 @@ jobs:
           curl -L -o sing-box.tar.gz https://github.com/SagerNet/sing-box/releases/download/v1.10.0/sing-box-1.10.0-linux-amd64.tar.gz
           tar -xvf sing-box.tar.gz
           # 编译成 srs，RB5009 加载速度提升 10 倍
-          ./sing-box-1.10.0-linux-amd64/sing-box rule-set compile fakeip-filter.json
+          ./sing-box-*/sing-box rule-set compile fakeip-filter.json
 
       - name: Commit and Push
         run: |
