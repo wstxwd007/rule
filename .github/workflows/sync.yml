@@ -2,7 +2,7 @@ name: Sync and Downgrade Version
 
 on:
   schedule:
-    - cron: '0 2 * * *' # 每天北京时间上午 10 点运行
+    - cron: '0 0 * * *' # 每天北京时间上午 8 点运行
   workflow_dispatch:   # 允许你手动点击运行
 
 jobs:
@@ -19,7 +19,7 @@ jobs:
           
           # 2. 将 "version": 4 替换为 "version": 2
           # 这样修改极其高效，不依赖复杂环境
-          sed -i 's/"version": 4/"version": 2/g' rules.json
+          sed -i 's/"version": 4/"version": 2/g' fakeip-filter.json
 
       - name: Compile to SRS (Optional but Recommended)
         run: |
