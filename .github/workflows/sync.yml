@@ -2,8 +2,8 @@ name: Sync and Downgrade Version
 
 on:
   schedule:
-    - cron: '*/10 * * * *'  # 每 10 分钟尝试运行一次
-  workflow_dispatch:   # 允许你手动点击运行
+    - cron: '0 3 * * *'
+  workflow_dispatch:
 
 jobs:
   sync-task:
