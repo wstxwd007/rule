@@ -2,7 +2,10 @@ name: Sync and Downgrade Version
 
 on:
   schedule:
-    - cron: '0 3 * * *'
+    - cron: '7 2 * * *'
+  push:              # 添加这一行，推送代码即刻运行
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
