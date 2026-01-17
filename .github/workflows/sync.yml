@@ -2,7 +2,7 @@ name: Sync and Downgrade Version
 
 on:
   schedule:
-    - cron: '7 2 * * *'
+    - cron: '37 3 * * *'
   push:              # 添加这一行，推送代码即刻运行
     branches:
       - main
@@ -15,29 +15,47 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download and Modify
+      - name: Check for updates
+        id: check
         run: |
-          # 1. 下载原作者文件
-          curl -L -o fakeip-filter.json https://github.com/DustinWin/ruleset_geodata/releases/download/sing-box-ruleset/fakeip-filter.json
-          curl -L -o proxy.json https://github.com/DustinWin/ruleset_geodata/releases/download/sing-box-ruleset/proxy.json
-          # 2. 将 "version": 4 替换为 "version": 2
-          # 这样修改极其高效，不依赖复杂环境
-          sed -i 's/"version": 4/"version": 2/g' fakeip-filter.json
+          # 1. 下载远程文件到临时目录
+          curl -L -o /tmp/remote_proxy.json https://github.com/DustinWin/ruleset_geodata/releases/download/sing-box-ruleset/proxy.json
+          curl -L -o /tmp/remote_fakeip.json https://github.com/DustinWin/ruleset_geodata/releases/download/sing-box-ruleset/fakeip-filter.json
+          
+          # 2. 计算远程哈希并与本地文件对比
+          # 如果本地文件不存在，sha256sum 会报错，直接判定为需要更新
+          REMOTE_HASH=$(sha256sum /tmp/remote_proxy.json /tmp/remote_fakeip.json)
+          LOCAL_HASH=$(sha256sum proxy.json fakeip-filter.json 2>/dev/null || echo "new")
+
+          if [ "$REMOTE_HASH" != "$LOCAL_HASH" ]; then
+            echo "updated=true" >> $GITHUB_OUTPUT
+            cp /tmp/remote_proxy.json ./proxy.json
+            cp /tmp/remote_fakeip.json ./fakeip-filter.json
+          else
+            echo "updated=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Process and Compile
+        if: steps.check.outputs.updated == 'true'
+        run: |
+          # 降级版本
           sed -i 's/"version": 4/"version": 2/g' proxy.json
-      - name: Compile to SRS
-        run: |
+          sed -i 's/"version": 4/"version": 2/g' fakeip-filter.json
+          
+          # 下载 sing-box 编译器
           curl -L -o sing-box.tar.gz https://github.com/SagerNet/sing-box/releases/download/v1.11.0/sing-box-1.11.0-linux-amd64.tar.gz
           tar -xvf sing-box.tar.gz
-          # 自动编译目录下所有的 json 文件
-          for json_file in *.json; do
-            echo "Compiling $json_file..."
-            ./sing-box-*/sing-box rule-set compile "$json_file"
+          
+          # 编译
+          for f in *.json; do
+            ./sing-box-*/sing-box rule-set compile "$f"
           done
+
       - name: Commit and Push
+        if: steps.check.outputs.updated == 'true'
         run: |
           git config --global user.name "Actions Bot"
           git config --global user.email "actions@github.com"
-          # 使用通配符，确保所有修改都被记录
           git add *.json *.srs
-          git commit -m "Batch update: Downgraded to v2 and compiled to SRS" || exit 0
+          git commit -m "Auto Sync: Remote version updated"
           git push
