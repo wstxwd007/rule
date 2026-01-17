@@ -50,12 +50,18 @@ jobs:
           for f in *.json; do
             ./sing-box-*/sing-box rule-set compile "$f"
           done
-
+          # 添加清理命令，避免把编译工具本身提交到 Git
+          rm -rf sing-box* 
+ 
       - name: Commit and Push
         if: steps.check.outputs.updated == 'true'
         run: |
           git config --global user.name "Actions Bot"
           git config --global user.email "actions@github.com"
-          git add *.json *.srs
-          git commit -m "Auto Sync: Remote version updated"
+          
+          # 使用 git add . 添加所有变更（包括 SRS 文件和新目录）
+          git add . 
+          
+          git commit -m "Auto Sync: Remote version updated" || exit 0
           git push
+
