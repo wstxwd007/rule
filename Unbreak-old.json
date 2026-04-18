@@ -5,6 +5,7 @@
             "domain": [
                 "registry.linkease.net",
                 "edge.api.myqnapcloud.com",
+                "qcloud-pr-backend-390510218.us-east-1.elb.amazonaws.com",
                 "edge.myqnapcloud.io"
             ],
             "domain_suffix": [
