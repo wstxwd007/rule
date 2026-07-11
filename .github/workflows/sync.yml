@@ -1,7 +1,8 @@
-name: Sync and Compile All Rule Sets
+name: Sync and Compile V5 and V2 Rules
 
 on:
   schedule:
+    # UTC 03:37，即北京时间 11:37
     - cron: "37 3 * * *"
 
   push:
@@ -27,7 +28,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download upstream rules
+      - name: Download upstream V5 rules
         shell: bash
         run: |
           set -euo pipefail
@@ -60,20 +61,26 @@ jobs:
           tmp_dir = Path(os.environ["RUNNER_TEMP"]) / "upstream-rules"
 
           for filename in ("proxy.json", "fakeip-filter.json"):
-              path = tmp_dir / filename
+              source = tmp_dir / filename
 
-              with path.open("r", encoding="utf-8") as file:
-                  data = json.load(file)
+              try:
+                  with source.open("r", encoding="utf-8") as file:
+                      data = json.load(file)
+              except Exception as exc:
+                  raise SystemExit(
+                      f"上游文件不是有效 JSON：{source}: {exc}"
+                  ) from exc
 
               if not isinstance(data, dict):
-                  raise SystemExit(f"{filename}: 根结构不是 JSON 对象")
+                  raise SystemExit(f"{source}: JSON 根结构不是对象")
 
               if not isinstance(data.get("rules"), list):
-                  raise SystemExit(f"{filename}: 缺少 rules 数组")
+                  raise SystemExit(f"{source}: 缺少 rules 数组")
 
-              data["version"] = 2
+              # 无 -old 的正式文件统一使用 version 5
+              data["version"] = 5
 
-              with path.open("w", encoding="utf-8", newline="\n") as file:
+              with source.open("w", encoding="utf-8", newline="\n") as file:
                   json.dump(
                       data,
                       file,
@@ -83,28 +90,29 @@ jobs:
                   file.write("\n")
 
               print(
-                  f"{filename}: version=2, "
-                  f"rules={len(data['rules'])}"
+                  f"{filename}: version=5, "
+                  f"规则组数={len(data['rules'])}"
               )
           PY
 
+          # 更新无 -old 的 V5 正式文件
           if ! cmp -s "$TMP_DIR/proxy.json" proxy.json 2>/dev/null; then
             cp "$TMP_DIR/proxy.json" proxy.json
-            echo "proxy.json updated"
+            echo "proxy.json 已更新为上游 V5"
           else
-            echo "proxy.json unchanged"
+            echo "proxy.json 无变化"
           fi
 
           if ! cmp -s \
             "$TMP_DIR/fakeip-filter.json" \
             fakeip-filter.json 2>/dev/null; then
             cp "$TMP_DIR/fakeip-filter.json" fakeip-filter.json
-            echo "fakeip-filter.json updated"
+            echo "fakeip-filter.json 已更新为上游 V5"
           else
-            echo "fakeip-filter.json unchanged"
+            echo "fakeip-filter.json 无变化"
           fi
 
-      - name: Find and normalize all rule-set JSON files
+      - name: Generate V5 and V2 rule files
         shell: bash
         run: |
           set -euo pipefail
@@ -113,43 +121,43 @@ jobs:
           export RULE_LIST
 
           python3 <<'PY'
+          import copy
           import json
           import os
           from pathlib import Path
 
           root = Path(".")
-          output = Path(os.environ["RULE_LIST"])
+          list_path = Path(os.environ["RULE_LIST"])
 
           excluded_dirs = {
               ".git",
+              ".github",
               "node_modules",
               "vendor",
               "dist",
               "build",
           }
 
-          rule_files = []
+          def is_excluded(path: Path) -> bool:
+              return any(part in excluded_dirs for part in path.parts)
 
-          for path in sorted(root.rglob("*.json")):
-              if any(part in excluded_dirs for part in path.parts):
-                  continue
-
+          def load_rule_set(path: Path):
               try:
                   with path.open("r", encoding="utf-8") as file:
                       data = json.load(file)
-              except (json.JSONDecodeError, UnicodeDecodeError):
-                  print(f"跳过普通或无效 JSON：{path}")
-                  continue
+              except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+                  return None
 
-              # 只处理 sing-box 源规则集
               if not isinstance(data, dict):
-                  continue
+                  return None
 
               if not isinstance(data.get("rules"), list):
-                  continue
+                  return None
 
-              old_version = data.get("version")
-              data["version"] = 2
+              return data
+
+          def write_json(path: Path, data: dict):
+              path.parent.mkdir(parents=True, exist_ok=True)
 
               with path.open("w", encoding="utf-8", newline="\n") as file:
                   json.dump(
@@ -160,34 +168,105 @@ jobs:
                   )
                   file.write("\n")
 
-              rule_files.append(path.as_posix())
+          # 收集所有规则集 JSON
+          candidates = []
 
-              print(
-                  f"识别规则集：{path} "
-                  f"version {old_version} -> 2，"
-                  f"规则组数：{len(data['rules'])}"
+          for path in sorted(root.rglob("*.json")):
+              if is_excluded(path):
+                  continue
+
+              data = load_rule_set(path)
+
+              if data is not None:
+                  candidates.append(path)
+
+          if not candidates:
+              raise SystemExit("仓库中没有找到 sing-box 规则集 JSON")
+
+          # 收集无 -old 的正式文件路径
+          base_files = set()
+
+          for path in candidates:
+              if path.stem.endswith("-old"):
+                  # Home-old.json → Home.json
+                  base_name = path.stem[:-4] + ".json"
+                  base_path = path.with_name(base_name)
+
+                  # 如果只有旧版文件，则自动生成正式 V5 文件
+                  if load_rule_set(base_path) is None:
+                      old_data = load_rule_set(path)
+
+                      if old_data is None:
+                          continue
+
+                      v5_data = copy.deepcopy(old_data)
+                      v5_data["version"] = 5
+                      write_json(base_path, v5_data)
+
+                      print(
+                          f"由旧版补建 V5："
+                          f"{path.as_posix()} → {base_path.as_posix()}"
+                      )
+
+                  base_files.add(base_path)
+              else:
+                  base_files.add(path)
+
+          generated_files = []
+
+          for base_path in sorted(base_files):
+              source_data = load_rule_set(base_path)
+
+              if source_data is None:
+                  raise SystemExit(
+                      f"无法读取正式规则文件：{base_path}"
+                  )
+
+              # 正式文件：名称.json，固定 version 5
+              v5_data = copy.deepcopy(source_data)
+              v5_data["version"] = 5
+              write_json(base_path, v5_data)
+
+              # 旧版文件：名称-old.json，固定 version 2
+              old_path = base_path.with_name(
+                  f"{base_path.stem}-old.json"
               )
 
-          if not rule_files:
-              raise SystemExit("仓库中没有找到合法的 sing-box 规则集 JSON")
+              v2_data = copy.deepcopy(v5_data)
+              v2_data["version"] = 2
+              write_json(old_path, v2_data)
 
-          output.write_text(
-              "\n".join(rule_files) + "\n",
+              generated_files.extend([
+                  base_path.as_posix(),
+                  old_path.as_posix(),
+              ])
+
+              print("----------------------------------------")
+              print(f"V5：{base_path}")
+              print(f"V2：{old_path}")
+              print(f"规则组数：{len(v5_data['rules'])}")
+
+          generated_files = sorted(set(generated_files))
+
+          list_path.write_text(
+              "\n".join(generated_files) + "\n",
               encoding="utf-8",
           )
 
-          print(f"共找到 {len(rule_files)} 个规则集 JSON")
+          print("========================================")
+          print(f"共生成 {len(generated_files)} 个 JSON 文件")
+          print("待编译文件：")
+
+          for filename in generated_files:
+              print(filename)
           PY
 
-          echo "准备编译以下文件："
-          cat "$RULE_LIST"
-
-      - name: Download sing-box compiler
+      - name: Download sing-box 1.14 compiler
         shell: bash
         run: |
           set -euo pipefail
 
-          SING_BOX_VERSION="1.11.0"
+          SING_BOX_VERSION="1.14.0-alpha.43"
           COMPILER_DIR="$RUNNER_TEMP/sing-box-compiler"
 
           rm -rf "$COMPILER_DIR"
@@ -224,7 +303,7 @@ jobs:
 
           "$SING_BOX_BIN" version
 
-      - name: Compile all rule sets
+      - name: Compile all V5 and V2 rule sets
         shell: bash
         run: |
           set -euo pipefail
@@ -236,8 +315,8 @@ jobs:
 
             srs_file="${json_file%.json}.srs"
 
-            echo "----------------------------------------"
-            echo "编译：$json_file"
+            echo "========================================"
+            echo "输入：$json_file"
             echo "输出：$srs_file"
 
             rm -f "$srs_file"
@@ -247,12 +326,74 @@ jobs:
               "$json_file"
 
             if [ ! -s "$srs_file" ]; then
-              echo "编译失败或输出文件为空：$srs_file"
+              echo "编译失败或输出为空：$srs_file"
               exit 1
             fi
 
             ls -lh "$json_file" "$srs_file"
           done < "$RULE_LIST"
+
+      - name: Verify naming and versions
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          RULE_LIST="$RUNNER_TEMP/ruleset-files.txt"
+          export RULE_LIST
+
+          python3 <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          list_path = Path(os.environ["RULE_LIST"])
+          files = [
+              Path(line.strip())
+              for line in list_path.read_text(
+                  encoding="utf-8"
+              ).splitlines()
+              if line.strip()
+          ]
+
+          errors = []
+
+          for path in files:
+              with path.open("r", encoding="utf-8") as file:
+                  data = json.load(file)
+
+              actual = data.get("version")
+
+              if path.stem.endswith("-old"):
+                  expected = 2
+              else:
+                  expected = 5
+
+              if actual != expected:
+                  errors.append(
+                      f"{path}: 应为 version {expected}，"
+                      f"实际为 {actual}"
+                  )
+
+              srs_path = path.with_suffix(".srs")
+
+              if not srs_path.is_file():
+                  errors.append(f"{srs_path}: 文件不存在")
+              elif srs_path.stat().st_size == 0:
+                  errors.append(f"{srs_path}: 文件为空")
+
+          if errors:
+              print("校验失败：")
+
+              for error in errors:
+                  print(f"- {error}")
+
+              raise SystemExit(1)
+
+          print("全部校验通过：")
+          print("- 无 -old：version 5")
+          print("- 有 -old：version 2")
+          print("- 所有 JSON 均已生成对应 SRS")
+          PY
 
       - name: Commit and push
         shell: bash
@@ -274,12 +415,14 @@ jobs:
           done < "$RULE_LIST"
 
           if git diff --cached --quiet; then
-            echo "所有 JSON 和 SRS 均无变化，不需要提交。"
+            echo "所有规则均无变化，不需要提交。"
             exit 0
           fi
 
-          echo "即将提交以下变化："
+          echo "即将提交："
           git diff --cached --stat
 
-          git commit -m "Auto Sync: update and compile all rule sets"
+          git commit -m \
+            "Auto Sync: update V5 and V2 old rule sets"
+
           git push
