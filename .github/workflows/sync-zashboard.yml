@@ -1,0 +1,95 @@
+name: Sync Zashboard Release
+
+on:
+  schedule:
+    # 每天北京时间 12:17 执行
+    - cron: "17 4 * * *"
+
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-zashboard-release
+  cancel-in-progress: false
+
+jobs:
+  sync-zashboard:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Download latest Zashboard release
+        id: download
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TARGET_DIR="ui"
+          TARGET_FILE="$TARGET_DIR/zashboard-dist-no-fonts.zip"
+          TEMP_FILE="$RUNNER_TEMP/zashboard-dist-no-fonts.zip"
+
+          mkdir -p "$TARGET_DIR"
+
+          echo "Downloading latest Zashboard release..."
+
+          curl -fL \
+            --retry 5 \
+            --retry-all-errors \
+            --retry-delay 3 \
+            --connect-timeout 20 \
+            --max-time 300 \
+            "https://github.com/Zephyruso/zashboard/releases/latest/download/dist-no-fonts.zip" \
+            -o "$TEMP_FILE"
+
+          if [ ! -s "$TEMP_FILE" ]; then
+            echo "Downloaded file is empty."
+            exit 1
+          fi
+
+          echo "Checking ZIP archive..."
+
+          unzip -t "$TEMP_FILE"
+
+          echo "Downloaded file:"
+          ls -lh "$TEMP_FILE"
+          sha256sum "$TEMP_FILE"
+
+          if [ -f "$TARGET_FILE" ] && cmp -s "$TEMP_FILE" "$TARGET_FILE"; then
+            echo "Zashboard release is unchanged."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          mv -f "$TEMP_FILE" "$TARGET_FILE"
+
+          echo "Zashboard mirror updated:"
+          ls -lh "$TARGET_FILE"
+          sha256sum "$TARGET_FILE"
+
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and push
+        if: steps.download.outputs.changed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add ui/zashboard-dist-no-fonts.zip
+
+          if git diff --cached --quiet; then
+            echo "No effective changes."
+            exit 0
+          fi
+
+          git commit -m "Sync latest Zashboard release"
+          git push
