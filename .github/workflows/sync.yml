@@ -1,22 +1,18 @@
-name: Sync and Downgrade Version
+name: Sync and Compile All Rule Sets
 
 on:
   schedule:
-    # GitHub Actions 的 cron 使用 UTC
     - cron: "37 3 * * *"
 
-  # 推送 main 分支时立即执行
   push:
     branches:
       - main
 
   workflow_dispatch:
 
-# 允许 GITHUB_TOKEN 提交和推送文件
 permissions:
   contents: write
 
-# 防止定时任务和手动任务同时运行
 concurrency:
   group: sync-sing-box-rules
   cancel-in-progress: false
@@ -31,24 +27,21 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download and compare rules
-        id: check
+      - name: Download upstream rules
         shell: bash
         run: |
           set -euo pipefail
 
-          TMP_DIR="$(mktemp -d)"
-          export TMP_DIR
-          trap 'rm -rf "$TMP_DIR"' EXIT
-
-          echo "Downloading upstream rules..."
+          TMP_DIR="$RUNNER_TEMP/upstream-rules"
+          rm -rf "$TMP_DIR"
+          mkdir -p "$TMP_DIR"
 
           curl -fL \
             --retry 3 \
             --retry-delay 2 \
             --connect-timeout 15 \
             --max-time 300 \
-            -o "$TMP_DIR/proxy.remote.json" \
+            -o "$TMP_DIR/proxy.json" \
             "https://github.com/DustinWin/ruleset_geodata/releases/download/sing-box-ruleset/proxy.json"
 
           curl -fL \
@@ -56,52 +49,31 @@ jobs:
             --retry-delay 2 \
             --connect-timeout 15 \
             --max-time 300 \
-            -o "$TMP_DIR/fakeip-filter.remote.json" \
+            -o "$TMP_DIR/fakeip-filter.json" \
             "https://github.com/DustinWin/ruleset_geodata/releases/download/sing-box-ruleset/fakeip-filter.json"
-
-          echo "Validating and converting source version to 2..."
 
           python3 <<'PY'
           import json
           import os
           from pathlib import Path
 
-          tmp_dir = Path(os.environ["TMP_DIR"])
+          tmp_dir = Path(os.environ["RUNNER_TEMP"]) / "upstream-rules"
 
-          files = {
-              "proxy": (
-                  tmp_dir / "proxy.remote.json",
-                  tmp_dir / "proxy.json",
-              ),
-              "fakeip-filter": (
-                  tmp_dir / "fakeip-filter.remote.json",
-                  tmp_dir / "fakeip-filter.json",
-              ),
-          }
+          for filename in ("proxy.json", "fakeip-filter.json"):
+              path = tmp_dir / filename
 
-          for name, (source, target) in files.items():
-              try:
-                  with source.open("r", encoding="utf-8") as file:
-                      data = json.load(file)
-              except Exception as exc:
-                  raise SystemExit(
-                      f"Invalid upstream JSON: {source}: {exc}"
-                  ) from exc
+              with path.open("r", encoding="utf-8") as file:
+                  data = json.load(file)
 
               if not isinstance(data, dict):
-                  raise SystemExit(
-                      f"Invalid rule-set root in {source}: expected object"
-                  )
+                  raise SystemExit(f"{filename}: 根结构不是 JSON 对象")
 
               if not isinstance(data.get("rules"), list):
-                  raise SystemExit(
-                      f"Invalid rule-set in {source}: missing rules array"
-                  )
+                  raise SystemExit(f"{filename}: 缺少 rules 数组")
 
-              # 保留规则内容，只把源格式版本改为 2
               data["version"] = 2
 
-              with target.open("w", encoding="utf-8", newline="\n") as file:
+              with path.open("w", encoding="utf-8", newline="\n") as file:
                   json.dump(
                       data,
                       file,
@@ -111,35 +83,106 @@ jobs:
                   file.write("\n")
 
               print(
-                  f"{name}: version={data['version']}, "
+                  f"{filename}: version=2, "
                   f"rules={len(data['rules'])}"
               )
           PY
 
-          UPDATED=false
-
-          if ! cmp -s "$TMP_DIR/proxy.json" "proxy.json"; then
-            echo "proxy.json has changed."
-            cp "$TMP_DIR/proxy.json" "proxy.json"
-            UPDATED=true
+          if ! cmp -s "$TMP_DIR/proxy.json" proxy.json 2>/dev/null; then
+            cp "$TMP_DIR/proxy.json" proxy.json
+            echo "proxy.json updated"
           else
-            echo "proxy.json is unchanged."
+            echo "proxy.json unchanged"
           fi
 
           if ! cmp -s \
             "$TMP_DIR/fakeip-filter.json" \
-            "fakeip-filter.json"; then
-            echo "fakeip-filter.json has changed."
-            cp "$TMP_DIR/fakeip-filter.json" "fakeip-filter.json"
-            UPDATED=true
+            fakeip-filter.json 2>/dev/null; then
+            cp "$TMP_DIR/fakeip-filter.json" fakeip-filter.json
+            echo "fakeip-filter.json updated"
           else
-            echo "fakeip-filter.json is unchanged."
+            echo "fakeip-filter.json unchanged"
           fi
 
-          echo "updated=$UPDATED" >> "$GITHUB_OUTPUT"
+      - name: Find and normalize all rule-set JSON files
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          RULE_LIST="$RUNNER_TEMP/ruleset-files.txt"
+          export RULE_LIST
+
+          python3 <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(".")
+          output = Path(os.environ["RULE_LIST"])
+
+          excluded_dirs = {
+              ".git",
+              "node_modules",
+              "vendor",
+              "dist",
+              "build",
+          }
+
+          rule_files = []
+
+          for path in sorted(root.rglob("*.json")):
+              if any(part in excluded_dirs for part in path.parts):
+                  continue
+
+              try:
+                  with path.open("r", encoding="utf-8") as file:
+                      data = json.load(file)
+              except (json.JSONDecodeError, UnicodeDecodeError):
+                  print(f"跳过普通或无效 JSON：{path}")
+                  continue
+
+              # 只处理 sing-box 源规则集
+              if not isinstance(data, dict):
+                  continue
+
+              if not isinstance(data.get("rules"), list):
+                  continue
+
+              old_version = data.get("version")
+              data["version"] = 2
+
+              with path.open("w", encoding="utf-8", newline="\n") as file:
+                  json.dump(
+                      data,
+                      file,
+                      ensure_ascii=False,
+                      indent=2,
+                  )
+                  file.write("\n")
+
+              rule_files.append(path.as_posix())
+
+              print(
+                  f"识别规则集：{path} "
+                  f"version {old_version} -> 2，"
+                  f"规则组数：{len(data['rules'])}"
+              )
+
+          if not rule_files:
+              raise SystemExit("仓库中没有找到合法的 sing-box 规则集 JSON")
+
+          output.write_text(
+              "\n".join(rule_files) + "\n",
+              encoding="utf-8",
+          )
+
+          print(f"共找到 {len(rule_files)} 个规则集 JSON")
+          PY
+
+          echo "准备编译以下文件："
+          cat "$RULE_LIST"
 
       - name: Download sing-box compiler
-        if: steps.check.outputs.updated == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -171,7 +214,7 @@ jobs:
           )"
 
           if [ -z "$SING_BOX_BIN" ]; then
-            echo "sing-box compiler was not found."
+            echo "没有找到 sing-box 编译器"
             exit 1
           fi
 
@@ -181,59 +224,62 @@ jobs:
 
           "$SING_BOX_BIN" version
 
-      - name: Compile rule sets
-        if: steps.check.outputs.updated == 'true'
+      - name: Compile all rule sets
         shell: bash
         run: |
           set -euo pipefail
 
-          # 只编译这两个目标规则，避免误编译其他 JSON
-          "$SING_BOX_BIN" rule-set compile \
-            --output proxy.srs \
-            proxy.json
+          RULE_LIST="$RUNNER_TEMP/ruleset-files.txt"
 
-          "$SING_BOX_BIN" rule-set compile \
-            --output fakeip-filter.srs \
-            fakeip-filter.json
+          while IFS= read -r json_file; do
+            [ -n "$json_file" ] || continue
 
-          if [ ! -s "proxy.srs" ]; then
-            echo "proxy.srs was not generated."
-            exit 1
-          fi
+            srs_file="${json_file%.json}.srs"
 
-          if [ ! -s "fakeip-filter.srs" ]; then
-            echo "fakeip-filter.srs was not generated."
-            exit 1
-          fi
+            echo "----------------------------------------"
+            echo "编译：$json_file"
+            echo "输出：$srs_file"
 
-          echo "Compiled files:"
-          ls -lh \
-            proxy.json \
-            proxy.srs \
-            fakeip-filter.json \
-            fakeip-filter.srs
+            rm -f "$srs_file"
+
+            "$SING_BOX_BIN" rule-set compile \
+              --output "$srs_file" \
+              "$json_file"
+
+            if [ ! -s "$srs_file" ]; then
+              echo "编译失败或输出文件为空：$srs_file"
+              exit 1
+            fi
+
+            ls -lh "$json_file" "$srs_file"
+          done < "$RULE_LIST"
 
       - name: Commit and push
-        if: steps.check.outputs.updated == 'true'
         shell: bash
         run: |
           set -euo pipefail
+
+          RULE_LIST="$RUNNER_TEMP/ruleset-files.txt"
 
           git config user.name "github-actions[bot]"
           git config user.email \
             "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # 只提交这四个目标文件
-          git add \
-            proxy.json \
-            proxy.srs \
-            fakeip-filter.json \
-            fakeip-filter.srs
+          while IFS= read -r json_file; do
+            [ -n "$json_file" ] || continue
+
+            srs_file="${json_file%.json}.srs"
+
+            git add "$json_file" "$srs_file"
+          done < "$RULE_LIST"
 
           if git diff --cached --quiet; then
-            echo "No effective file changes; skipping commit."
+            echo "所有 JSON 和 SRS 均无变化，不需要提交。"
             exit 0
           fi
 
-          git commit -m "Auto Sync: update sing-box rules"
+          echo "即将提交以下变化："
+          git diff --cached --stat
+
+          git commit -m "Auto Sync: update and compile all rule sets"
           git push
