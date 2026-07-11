@@ -2,66 +2,238 @@ name: Sync and Downgrade Version
 
 on:
   schedule:
-    - cron: '37 3 * * *'
-  push:              # 添加这一行，推送代码即刻运行
+    # GitHub Actions 的 cron 使用 UTC
+    - cron: "37 3 * * *"
+
+  # 推送 main 分支时立即执行
+  push:
     branches:
       - main
+
   workflow_dispatch:
+
+# 允许 GITHUB_TOKEN 提交和推送文件
+permissions:
+  contents: write
+
+# 防止定时任务和手动任务同时运行
+concurrency:
+  group: sync-sing-box-rules
+  cancel-in-progress: false
 
 jobs:
   sync-task:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
-      - name: Check for updates
+      - name: Download and compare rules
         id: check
+        shell: bash
         run: |
-          # 1. 下载远程文件到临时目录
-          curl -L -o /tmp/remote_proxy.json https://github.com/DustinWin/ruleset_geodata/releases/download/sing-box-ruleset/proxy.json
-          curl -L -o /tmp/remote_fakeip.json https://github.com/DustinWin/ruleset_geodata/releases/download/sing-box-ruleset/fakeip-filter.json
-          
-          # 2. 计算远程哈希并与本地文件对比
-          # 如果本地文件不存在，sha256sum 会报错，直接判定为需要更新
-          REMOTE_HASH=$(sha256sum /tmp/remote_proxy.json /tmp/remote_fakeip.json)
-          LOCAL_HASH=$(sha256sum proxy.json fakeip-filter.json 2>/dev/null || echo "new")
+          set -euo pipefail
 
-          if [ "$REMOTE_HASH" != "$LOCAL_HASH" ]; then
-            echo "updated=true" >> $GITHUB_OUTPUT
-            cp /tmp/remote_proxy.json ./proxy.json
-            cp /tmp/remote_fakeip.json ./fakeip-filter.json
+          TMP_DIR="$(mktemp -d)"
+          export TMP_DIR
+          trap 'rm -rf "$TMP_DIR"' EXIT
+
+          echo "Downloading upstream rules..."
+
+          curl -fL \
+            --retry 3 \
+            --retry-delay 2 \
+            --connect-timeout 15 \
+            --max-time 300 \
+            -o "$TMP_DIR/proxy.remote.json" \
+            "https://github.com/DustinWin/ruleset_geodata/releases/download/sing-box-ruleset/proxy.json"
+
+          curl -fL \
+            --retry 3 \
+            --retry-delay 2 \
+            --connect-timeout 15 \
+            --max-time 300 \
+            -o "$TMP_DIR/fakeip-filter.remote.json" \
+            "https://github.com/DustinWin/ruleset_geodata/releases/download/sing-box-ruleset/fakeip-filter.json"
+
+          echo "Validating and converting source version to 2..."
+
+          python3 <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          tmp_dir = Path(os.environ["TMP_DIR"])
+
+          files = {
+              "proxy": (
+                  tmp_dir / "proxy.remote.json",
+                  tmp_dir / "proxy.json",
+              ),
+              "fakeip-filter": (
+                  tmp_dir / "fakeip-filter.remote.json",
+                  tmp_dir / "fakeip-filter.json",
+              ),
+          }
+
+          for name, (source, target) in files.items():
+              try:
+                  with source.open("r", encoding="utf-8") as file:
+                      data = json.load(file)
+              except Exception as exc:
+                  raise SystemExit(
+                      f"Invalid upstream JSON: {source}: {exc}"
+                  ) from exc
+
+              if not isinstance(data, dict):
+                  raise SystemExit(
+                      f"Invalid rule-set root in {source}: expected object"
+                  )
+
+              if not isinstance(data.get("rules"), list):
+                  raise SystemExit(
+                      f"Invalid rule-set in {source}: missing rules array"
+                  )
+
+              # 保留规则内容，只把源格式版本改为 2
+              data["version"] = 2
+
+              with target.open("w", encoding="utf-8", newline="\n") as file:
+                  json.dump(
+                      data,
+                      file,
+                      ensure_ascii=False,
+                      indent=2,
+                  )
+                  file.write("\n")
+
+              print(
+                  f"{name}: version={data['version']}, "
+                  f"rules={len(data['rules'])}"
+              )
+          PY
+
+          UPDATED=false
+
+          if ! cmp -s "$TMP_DIR/proxy.json" "proxy.json"; then
+            echo "proxy.json has changed."
+            cp "$TMP_DIR/proxy.json" "proxy.json"
+            UPDATED=true
           else
-            echo "updated=false" >> $GITHUB_OUTPUT
+            echo "proxy.json is unchanged."
           fi
 
-      - name: Process and Compile
-        if: steps.check.outputs.updated == 'true'
-        run: |
-          # 降级版本
-          sed -i 's/"version": 5/"version": 2/g' proxy.json
-          sed -i 's/"version": 5/"version": 2/g' fakeip-filter.json
-          
-          # 下载 sing-box 编译器
-          curl -L -o sing-box.tar.gz https://github.com/SagerNet/sing-box/releases/download/v1.11.0/sing-box-1.11.0-linux-amd64.tar.gz
-          tar -xvf sing-box.tar.gz
-          
-          # 编译
-          for f in *.json; do
-            ./sing-box-*/sing-box rule-set compile "$f"
-          done
-          # 添加清理命令，避免把编译工具本身提交到 Git
-          rm -rf sing-box* 
- 
-      - name: Commit and Push
-        if: steps.check.outputs.updated == 'true'
-        run: |
-          git config --global user.name "Actions Bot"
-          git config --global user.email "actions@github.com"
-          
-          # 使用 git add . 添加所有变更（包括 SRS 文件和新目录）
-          git add . 
-          
-          git commit -m "Auto Sync: Remote version updated" || exit 0
-          git push
+          if ! cmp -s \
+            "$TMP_DIR/fakeip-filter.json" \
+            "fakeip-filter.json"; then
+            echo "fakeip-filter.json has changed."
+            cp "$TMP_DIR/fakeip-filter.json" "fakeip-filter.json"
+            UPDATED=true
+          else
+            echo "fakeip-filter.json is unchanged."
+          fi
 
+          echo "updated=$UPDATED" >> "$GITHUB_OUTPUT"
+
+      - name: Download sing-box compiler
+        if: steps.check.outputs.updated == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SING_BOX_VERSION="1.11.0"
+          COMPILER_DIR="$RUNNER_TEMP/sing-box-compiler"
+
+          rm -rf "$COMPILER_DIR"
+          mkdir -p "$COMPILER_DIR"
+
+          curl -fL \
+            --retry 3 \
+            --retry-delay 2 \
+            --connect-timeout 15 \
+            --max-time 300 \
+            -o "$COMPILER_DIR/sing-box.tar.gz" \
+            "https://github.com/SagerNet/sing-box/releases/download/v${SING_BOX_VERSION}/sing-box-${SING_BOX_VERSION}-linux-amd64.tar.gz"
+
+          tar -xzf \
+            "$COMPILER_DIR/sing-box.tar.gz" \
+            -C "$COMPILER_DIR"
+
+          SING_BOX_BIN="$(
+            find "$COMPILER_DIR" \
+              -type f \
+              -name sing-box \
+              -print \
+              -quit
+          )"
+
+          if [ -z "$SING_BOX_BIN" ]; then
+            echo "sing-box compiler was not found."
+            exit 1
+          fi
+
+          chmod +x "$SING_BOX_BIN"
+
+          echo "SING_BOX_BIN=$SING_BOX_BIN" >> "$GITHUB_ENV"
+
+          "$SING_BOX_BIN" version
+
+      - name: Compile rule sets
+        if: steps.check.outputs.updated == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # 只编译这两个目标规则，避免误编译其他 JSON
+          "$SING_BOX_BIN" rule-set compile \
+            --output proxy.srs \
+            proxy.json
+
+          "$SING_BOX_BIN" rule-set compile \
+            --output fakeip-filter.srs \
+            fakeip-filter.json
+
+          if [ ! -s "proxy.srs" ]; then
+            echo "proxy.srs was not generated."
+            exit 1
+          fi
+
+          if [ ! -s "fakeip-filter.srs" ]; then
+            echo "fakeip-filter.srs was not generated."
+            exit 1
+          fi
+
+          echo "Compiled files:"
+          ls -lh \
+            proxy.json \
+            proxy.srs \
+            fakeip-filter.json \
+            fakeip-filter.srs
+
+      - name: Commit and push
+        if: steps.check.outputs.updated == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # 只提交这四个目标文件
+          git add \
+            proxy.json \
+            proxy.srs \
+            fakeip-filter.json \
+            fakeip-filter.srs
+
+          if git diff --cached --quiet; then
+            echo "No effective file changes; skipping commit."
+            exit 0
+          fi
+
+          git commit -m "Auto Sync: update sing-box rules"
+          git push
