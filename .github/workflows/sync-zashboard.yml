@@ -2,8 +2,8 @@ name: Sync Zashboard Release
 
 on:
   schedule:
-    # 每天北京时间 12:17 执行
-    - cron: "17 4 * * *"
+    # 每 5 分钟检查一次，上游更新后通常几分钟内同步
+    - cron: "*/5 * * * *"
 
   workflow_dispatch:
 
@@ -17,6 +17,7 @@ concurrency:
 jobs:
   sync-zashboard:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout repository
@@ -24,19 +25,86 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download latest Zashboard release
+      - name: Check and download latest Zashboard release
         id: download
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
           TARGET_DIR="ui"
           TARGET_FILE="$TARGET_DIR/zashboard-dist-no-fonts.zip"
+          STATE_FILE="$TARGET_DIR/.zashboard-release-state"
+
+          RELEASE_JSON="$RUNNER_TEMP/zashboard-release.json"
           TEMP_FILE="$RUNNER_TEMP/zashboard-dist-no-fonts.zip"
+
+          API_URL="https://api.github.com/repos/Zephyruso/zashboard/releases/latest"
 
           mkdir -p "$TARGET_DIR"
 
-          echo "Downloading latest Zashboard release..."
+          echo "Checking latest Zashboard release..."
+
+          curl -fsSL \
+            --retry 5 \
+            --retry-all-errors \
+            --retry-delay 3 \
+            --connect-timeout 20 \
+            --max-time 60 \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$API_URL" \
+            -o "$RELEASE_JSON"
+
+          TAG_NAME="$(jq -r '.tag_name // empty' "$RELEASE_JSON")"
+
+          ASSET_JSON="$(
+            jq -c '
+              .assets[]
+              | select(.name == "dist-no-fonts.zip")
+            ' "$RELEASE_JSON" |
+            head -n 1
+          )"
+
+          if [ -z "$TAG_NAME" ]; then
+            echo "Unable to determine latest release tag."
+            exit 1
+          fi
+
+          if [ -z "$ASSET_JSON" ]; then
+            echo "dist-no-fonts.zip was not found in release $TAG_NAME."
+            exit 1
+          fi
+
+          ASSET_ID="$(jq -r '.id' <<< "$ASSET_JSON")"
+          ASSET_SIZE="$(jq -r '.size' <<< "$ASSET_JSON")"
+          ASSET_UPDATED_AT="$(jq -r '.updated_at' <<< "$ASSET_JSON")"
+          DOWNLOAD_URL="$(jq -r '.browser_download_url' <<< "$ASSET_JSON")"
+
+          RELEASE_STATE="${TAG_NAME}|${ASSET_ID}|${ASSET_UPDATED_AT}|${ASSET_SIZE}"
+          CURRENT_STATE=""
+
+          if [ -f "$STATE_FILE" ]; then
+            CURRENT_STATE="$(cat "$STATE_FILE")"
+          fi
+
+          echo "Latest release: $TAG_NAME"
+          echo "Asset ID:       $ASSET_ID"
+          echo "Asset size:     $ASSET_SIZE"
+          echo "Asset updated:  $ASSET_UPDATED_AT"
+
+          if [ -f "$TARGET_FILE" ] &&
+             [ "$CURRENT_STATE" = "$RELEASE_STATE" ]; then
+            echo "Zashboard release is unchanged."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "tag=$TAG_NAME" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "New or replaced release asset detected."
+          echo "Downloading dist-no-fonts.zip..."
 
           curl -fL \
             --retry 5 \
@@ -44,7 +112,7 @@ jobs:
             --retry-delay 3 \
             --connect-timeout 20 \
             --max-time 300 \
-            "https://github.com/Zephyruso/zashboard/releases/latest/download/dist-no-fonts.zip" \
+            "$DOWNLOAD_URL" \
             -o "$TEMP_FILE"
 
           if [ ! -s "$TEMP_FILE" ]; then
@@ -52,31 +120,38 @@ jobs:
             exit 1
           fi
 
+          ACTUAL_SIZE="$(stat -c '%s' "$TEMP_FILE")"
+
+          if [ "$ACTUAL_SIZE" != "$ASSET_SIZE" ]; then
+            echo "Downloaded file size mismatch."
+            echo "Expected: $ASSET_SIZE"
+            echo "Actual:   $ACTUAL_SIZE"
+            exit 1
+          fi
+
           echo "Checking ZIP archive..."
 
-          unzip -t "$TEMP_FILE"
+          unzip -tq "$TEMP_FILE"
 
           echo "Downloaded file:"
           ls -lh "$TEMP_FILE"
           sha256sum "$TEMP_FILE"
 
-          if [ -f "$TARGET_FILE" ] && cmp -s "$TEMP_FILE" "$TARGET_FILE"; then
-            echo "Zashboard release is unchanged."
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
           mv -f "$TEMP_FILE" "$TARGET_FILE"
+          printf '%s\n' "$RELEASE_STATE" > "$STATE_FILE"
 
           echo "Zashboard mirror updated:"
           ls -lh "$TARGET_FILE"
           sha256sum "$TARGET_FILE"
 
           echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Commit and push
         if: steps.download.outputs.changed == 'true'
         shell: bash
+        env:
+          RELEASE_TAG: ${{ steps.download.outputs.tag }}
         run: |
           set -euo pipefail
 
@@ -84,12 +159,14 @@ jobs:
           git config user.email \
             "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add ui/zashboard-dist-no-fonts.zip
+          git add \
+            ui/zashboard-dist-no-fonts.zip \
+            ui/.zashboard-release-state
 
           if git diff --cached --quiet; then
             echo "No effective changes."
             exit 0
           fi
 
-          git commit -m "Sync latest Zashboard release"
+          git commit -m "Sync Zashboard ${RELEASE_TAG}"
           git push
