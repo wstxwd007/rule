@@ -2,8 +2,8 @@ name: Sync Zashboard Release
 
 on:
   schedule:
-    # 每 5 分钟检查一次，上游更新后通常几分钟内同步
-    - cron: "*/5 * * * *"
+    # 每天北京时间 9:17 执行
+    - cron: "17 1 * * *"
 
   workflow_dispatch:
 
