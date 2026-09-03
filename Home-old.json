@@ -11,7 +11,8 @@
         "ros.mycloudnas.com",
         "hh007.myqnapcloud.com",
         "edge.api.myqnapcloud.com",
-        "edge.myqnapcloud.io"
+        "edge.myqnapcloud.io",
+        "core2.myqnapcloud.io"
       ],
       "domain_suffix": [
         ".lan",
